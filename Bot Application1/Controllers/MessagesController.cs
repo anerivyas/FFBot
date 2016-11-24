@@ -7,6 +7,8 @@ using System.Web.Http;
 using System.Web.Http.Description;
 using Microsoft.Bot.Connector;
 using Newtonsoft.Json;
+using System.Collections.Generic;
+using Bot_Application1.DataModels;
 
 namespace Bot_Application1
 {
@@ -22,12 +24,112 @@ namespace Bot_Application1
             if (activity.Type == ActivityTypes.Message)
             {
                 ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
-                // calculate something for us to return
-                int length = (activity.Text ?? string.Empty).Length;
 
-                // return our reply to the user
-                Activity reply = activity.CreateReply($"You sent {activity.Text} which was {length} characters");
-                await connector.Conversations.ReplyToActivityAsync(reply);
+                StateClient stateClient = activity.GetStateClient();
+                BotData userData = await stateClient.BotState.GetUserDataAsync(activity.ChannelId, activity.From.Id);
+
+                var userMessage = activity.Text;
+
+                string endOutput = "Hello";
+
+
+
+                bool isWeatherRequest = true;
+
+                if (userMessage.ToLower().Contains("clear"))
+                {
+                    endOutput = "User data cleared";
+                    await stateClient.BotState.DeleteStateForUserAsync(activity.ChannelId, activity.From.Id);
+                    isWeatherRequest = false;
+                }
+
+                if (userMessage.ToLower().Equals("view reviews"))
+                {
+                    List<Timeline> timelines = await AzureManager.AzureManagerInstance.GetTimelines();
+                    endOutput = "";
+                    foreach (Timeline t in timelines)
+                    {
+                        endOutput += "[" + t.ID + "] : " + t.Firstname + " said, " + t.Comments + "\n\n";
+                    }
+                    isWeatherRequest = false;
+
+                }
+
+                if (activity.Text.Length > 16)
+                {
+
+                    if (activity.Text.ToLower().Substring(0, 10).Equals("add review"))
+                    {
+
+                        string subs = activity.Text.Substring(11);
+                        string[] split = subs.Split(' ');
+                        userData.SetProperty<string>("Id", split[0]);
+                        userData.SetProperty<string>("firstName", split[1]);
+                        userData.SetProperty<string>("Comments", split[2]);
+
+
+
+                        Timeline Timeline = new Timeline()
+                        {
+                            ID = userData.GetProperty<string>("Id"),
+                            Firstname = userData.GetProperty<string>("firstName"),
+                            Comments = userData.GetProperty<string>("Comments")
+
+                        };
+
+                        await AzureManager.AzureManagerInstance.AddTimeline(Timeline);
+
+                        isWeatherRequest = false;
+
+                        endOutput = "New timeline added [" + Timeline.Firstname + "]";
+                    }
+                    isWeatherRequest = false;
+                }
+
+                if (userMessage.ToLower().Contains("update review"))
+                {
+                    var review = userMessage.Split(' ');
+                    List<Timeline> timelines = await AzureManager.AzureManagerInstance.GetTimelines();
+                    string firstname = activity.From.Name;
+                    bool isUpdated = false;
+                    foreach (Timeline t in timelines)
+                    {
+
+                        if (t.Firstname.Equals(firstname))
+                        {
+                            t.Firstname = "Bob";
+                            await AzureManager.AzureManagerInstance.UpdateTimeline(t);
+                            endOutput = "Your review has succesfully been added" + activity.From.Name;
+                            isUpdated = true;
+                            break;
+                        }
+                    }
+
+
+
+                    if (isUpdated == false)
+                    {
+                        isWeatherRequest = false;
+                        endOutput = "Sorry we cannot update your review. Try again.";
+                    }
+
+
+                }
+
+                if (!isWeatherRequest)
+                {
+                    // return our reply to the user
+                    Activity infoReply = activity.CreateReply(endOutput);
+
+                    await connector.Conversations.ReplyToActivityAsync(infoReply);
+
+                }
+                else
+                {
+
+                    Console.WriteLine("Error");
+
+                }
             }
             else
             {
@@ -36,6 +138,7 @@ namespace Bot_Application1
             var response = Request.CreateResponse(HttpStatusCode.OK);
             return response;
         }
+
 
         private Activity HandleSystemMessage(Activity message)
         {
